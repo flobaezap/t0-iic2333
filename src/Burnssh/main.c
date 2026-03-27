@@ -109,30 +109,56 @@ void execute_status(char** input) {
 }
 
 void terminar_procesos(char** input) { //IH: en base a función execute_status y updated_finished_processes
-  sleep(input[1]);
-  for (int i = 0; i < process_count; i++) {
-    Process p = process_table[i];
-    if (p.is_running) {
-      corriendo++;
-      process_table[i].is_running = 0; //IH: Lo que está en updated_finished_processes
-      process_table[i].elapsed_time = (int)(TIME(NULL) - process_table[i].start_time);
-      if (WIFEXITED(status)) {  //IH: Analizar con Florencia cómo actualizar exit_code y signal_value. O no es necesario hace esta parte porque se encargaría SIGTERM?
-        process_table[i].exit_code = WEXISTATUS(status);
-      } else if (WIFSIGNALED(status)) {
-        process_table[i].signal_value = WTERMSIG(status);
-      }
+  int time_to_wait = atoi(input[1]); // transforma el tiempo a esperar a int
+  int pids_to_abort[MAX_PROCESSES]; // Indices actuales
+  int corriendo = 0;
 
-      printf("Abort cumplido.\n");
-      printf("PID %d %d pausado %d %d\n",
-        p.pid,
-        p.executable_name,
-        p.exit_code,
-        p.signal_value); //IH: en base a execute_status
-      kill(p.pid, SIGTERM); //IHN: CITA: https://www.youtube.com/watch?v=W7xkbci4FBw
+  for (int i = 0; i < process_count; i++) {
+    // Process p = process_table[i]; ya estaba instanciada anteriormente, no es necesario volver a instanciarla
+    if (process_table[i].is_running) {
+      pids_to_abort[corriendo] = process_table[i].pid;
+      corriendo++;
     }
   }
+
   if (corriendo == 0) {
     printf("No hay procesos  en ejecución. Abort no se puede ejecutar. \n");
+    return;
+  }
+
+  pid_t abort_pid = fork();
+
+  if (abort_pid == 0) {
+
+    sleep(time_to_wait); 
+    int abort_impreso = 0;
+
+    for (int i = 0; i < corriendo; i++) {
+      int pid_obj = pids_to_abort[i];
+      if (kill(pid_obj, 0) == 0) {
+        if (abort_impreso == 0) {
+          printf("\nAbort cumplido.\n");
+          abort_impreso = 1;
+        }
+        for (int j = 0; j < process_count; j++) {
+          if (process_table[j].pid == pid_obj) {
+            int current_time = (int)(time(NULL) - process_table[j].start_time);
+            char* paused_str = process_table[j].is_paused ? "True" : "False";
+            
+            printf("%d %s %d %s %d %d\n", 
+              process_table[j].pid, 
+              process_table[j].executable_name, 
+              current_time, 
+              paused_str, 
+              process_table[j].exit_code, 
+              process_table[j].signal_value);
+            break;
+          }
+        }
+        kill(pid_obj, SIGTERM);
+      }
+    }
+    exit(0); 
   }
 }
 
