@@ -5,6 +5,8 @@
 #include <sys/wait.h>
 #include "../input_manager/manager.h"
 #include <time.h>
+#include <signal.h>
+#include <sys/types.h>
 
 #define TRUE 1
 #define MAX_PROCESSES 100
@@ -106,6 +108,34 @@ void execute_status(char** input) {
   printf("\n");
 }
 
+void terminar_procesos(char** input) { //IH: en base a función execute_status y updated_finished_processes
+  sleep(input[1]);
+  for (int i = 0; i < process_count; i++) {
+    Process p = process_table[i];
+    if (p.is_running) {
+      corriendo++;
+      process_table[i].is_running = 0; //IH: Lo que está en updated_finished_processes
+      process_table[i].elapsed_time = (int)(TIME(NULL) - process_table[i].start_time);
+      if (WIFEXITED(status)) {  //IH: Analizar con Florencia cómo actualizar exit_code y signal_value. O no es necesario hace esta parte porque se encargaría SIGTERM?
+        process_table[i].exit_code = WEXISTATUS(status);
+      } else if (WIFSIGNALED(status)) {
+        process_table[i].signal_value = WTERMSIG(status);
+      }
+
+      printf("Abort cumplido.\n");
+      printf("PID %d %d pausado %d %d\n",
+        p.pid,
+        p.executable_name,
+        p.exit_code,
+        p.signal_value); //IH: en base a execute_status
+      kill(p.pid, SIGTERM); //IHN: CITA: https://www.youtube.com/watch?v=W7xkbci4FBw
+    }
+  }
+  if (corriendo == 0) {
+    printf("No hay procesos  en ejecución. Abort no se puede ejecutar. \n");
+  }
+}
+
 
 int main(int argc, char const *argv[])
 {
@@ -129,6 +159,9 @@ int main(int argc, char const *argv[])
     }
     else if (strcmp(input[0], "status") == 0) {
       execute_status(input);
+    }
+    else if (strcmp(input[0], "abort") == 0) { //IH: En base a update_finish_process
+      terminar_procesos(input);
     }
     else if (strcmp(input[0], "exit") == 0) {
       free_user_input(input);
