@@ -6,7 +6,7 @@
 #include "../input_manager/manager.h"
 #include <time.h>
 #include <signal.h>
-#include <sys/types.h>
+#include <sys/types.h> //IH 27-03 HOLA
 
 #define TRUE 1
 #define MAX_PROCESSES 100
