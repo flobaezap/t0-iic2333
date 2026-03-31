@@ -108,7 +108,11 @@ void ejecutar_status() {
 
 }
 
-void terminar_procesos(char** input) { //IH: en base a función execute_status y updated_finished_processes
+void ejecutar_abort(char** input) { //IH: en base a función execute_status y updated_finished_processes
+  if (input[1] == NULL) {
+    printf("Error: el comando abort requiere un tiempo en segundos.\n");
+    return;
+  }
   int time_to_wait = atoi(input[1]); // transforma el tiempo a esperar a int
   int pids_to_abort[MAX_PROCESSES];
   int corriendo = 0;
@@ -227,7 +231,7 @@ int main(int argc, char const *argv[])
       if (shutdown_active) {
         printf("Comando abort anulado por shutdown en proceso.\n");
       } else {
-        terminar_procesos(input);
+        ejecutar_abort(input);
       }
     }
     else if (strcmp(input[0], "shutdown") == 0) {
