@@ -6,7 +6,7 @@
 #include "../input_manager/manager.h"
 #include <time.h>
 #include <signal.h>
-#include <sys/types.h> //IH 27-03 HOLA
+#include <sys/types.h> 
 
 #define TRUE 1
 #define MAX_PROCESSES 100
@@ -24,8 +24,22 @@ typedef struct {
 
 Process process_table[MAX_PROCESSES];
 int process_count = 0;
+int shutdown_active = 0;       
+time_t shutdown_start_time;
+pid_t pending_aborts[MAX_PROCESSES];
+int pending_aborts_count = 0;
 
-void update_finished_processes(){
+void imprimir_proceso(Process p) {
+    int current_time = p.elapsed_time;
+    if (p.is_running) {
+      current_time = (int)(time(NULL) - p.start_time);
+      // hay que reformular esto cuando hagamos el pause
+    }
+    char* paused_str = p.is_paused ? "True" : "False";
+    printf("%d %s %d %s %d %d\n", p.pid, p.executable_name, current_time, paused_str, p.exit_code, p.signal_value);
+}
+
+void actualizar_procesos(){
   int status;
   pid_t done_pid;
   while ((done_pid = waitpid(-1, &status, WNOHANG)) > 0) {
@@ -45,7 +59,7 @@ void update_finished_processes(){
   }
 }
 
-void register_new_process(pid_t pid, char* executable) {
+void registrar_proceso(pid_t pid, char* executable) {
   if (process_count < MAX_PROCESSES) {
     process_table[process_count].pid = pid;
     strncpy(process_table[process_count].executable_name, executable, 255);
@@ -63,7 +77,7 @@ void register_new_process(pid_t pid, char* executable) {
   }
 }
 
-void execute_launch(char** input){
+void ejecutar_launch(char** input){
   if (input[1] == NULL) {
     printf("Error: launch requiere el nombre de un ejecutable.\n");
     return;
@@ -79,42 +93,27 @@ void execute_launch(char** input){
   } 
   else {
     printf("Proceso '%s' lanzado en background con PID: %d\n", input[1], pid);
-    register_new_process(pid, input[1]);
+    registrar_proceso(pid, input[1]);
   }
 }
 
-void execute_status(char** input) {
+void ejecutar_status() {
   if (process_count == 0) {
-        printf("No hay procesos en el historial.\n");
-        return;
+    printf("No hay procesos en el historial.\n");
+    return;
+  }
+  for (int i = 0; i < process_count; i++) {
+    imprimir_proceso(process_table[i]);
   }
 
-  for (int i = 0; i < process_count; i++) {
-    Process p = process_table[i];
-    int current_time = p.elapsed_time;
-    if (p.is_running) {
-      current_time = (int)(time(NULL) - p.start_time);
-      // hay que reformular esto cuando hagamos el pause para que no cuente el tiempo de pausa
-    }
-    char* paused_str = p.is_paused ? "True" : "False";
-    printf("%d %s %d %s %d %d\n", 
-      p.pid, 
-      p.executable_name, 
-      current_time, 
-      paused_str, 
-      p.exit_code, 
-      p.signal_value);
-  }
-  printf("\n");
 }
 
 void terminar_procesos(char** input) { //IH: en base a función execute_status y updated_finished_processes
   int time_to_wait = atoi(input[1]); // transforma el tiempo a esperar a int
-  int pids_to_abort[MAX_PROCESSES]; // Indices actuales
+  int pids_to_abort[MAX_PROCESSES];
   int corriendo = 0;
 
   for (int i = 0; i < process_count; i++) {
-    // Process p = process_table[i]; ya estaba instanciada anteriormente, no es necesario volver a instanciarla
     if (process_table[i].is_running) {
       pids_to_abort[corriendo] = process_table[i].pid;
       corriendo++;
@@ -129,7 +128,6 @@ void terminar_procesos(char** input) { //IH: en base a función execute_status y
   pid_t abort_pid = fork();
 
   if (abort_pid == 0) {
-
     sleep(time_to_wait); 
     int abort_impreso = 0;
 
@@ -142,16 +140,7 @@ void terminar_procesos(char** input) { //IH: en base a función execute_status y
         }
         for (int j = 0; j < process_count; j++) {
           if (process_table[j].pid == pid_obj) {
-            int current_time = (int)(time(NULL) - process_table[j].start_time);
-            char* paused_str = process_table[j].is_paused ? "True" : "False";
-            
-            printf("%d %s %d %s %d %d\n", 
-              process_table[j].pid, 
-              process_table[j].executable_name, 
-              current_time, 
-              paused_str, 
-              process_table[j].exit_code, 
-              process_table[j].signal_value);
+            imprimir_proceso(process_table[j]);
             break;
           }
         }
@@ -159,9 +148,37 @@ void terminar_procesos(char** input) { //IH: en base a función execute_status y
       }
     }
     exit(0); 
+  } else if (abort_pid > 0) {
+    pending_aborts[pending_aborts_count] = abort_pid;
+    pending_aborts_count++;
   }
 }
 
+void ejecutar_shutdown() {
+  for (int i = 0; i < pending_aborts_count; i++) {
+    kill(pending_aborts[i], SIGKILL);
+  }
+  pending_aborts_count = 0; 
+  int corriendo = 0;
+
+  for (int i = 0; i < process_count; i++) {
+    if (process_table[i].is_running) {
+      kill(process_table[i].pid, SIGINT);
+      corriendo++;
+    }
+  }
+  
+  if (corriendo == 0) {
+    printf("burnssh finalizado.\n");
+    for (int i = 0; i < process_count; i++) {
+      imprimir_proceso(process_table[i]);
+    }
+    exit(0);
+  } else {
+    shutdown_active = 1;
+    shutdown_start_time = time(NULL);
+  }
+}
 
 int main(int argc, char const *argv[])
 {
@@ -169,7 +186,27 @@ int main(int argc, char const *argv[])
   printf("Iniciando burnssh...\n");
 
   while (TRUE) {
-    update_finished_processes();
+    actualizar_procesos();
+
+    if (shutdown_active) {
+      int time_passed = (int)(time(NULL) - shutdown_start_time);
+        
+      if (time_passed >= 10) {
+        for (int i = 0; i < process_count; i++) {
+          if (process_table[i].is_running) {
+            kill(process_table[i].pid, SIGKILL);
+          }
+        }
+    
+        usleep(50000); 
+        actualizar_procesos(); 
+        printf("burnssh finalizado.\n");
+        for (int i = 0; i < process_count; i++) {
+          imprimir_proceso(process_table[i]);
+        }
+        break; 
+      }
+    }
 
     printf("burnssh> ");
     fflush(stdout);
@@ -181,17 +218,22 @@ int main(int argc, char const *argv[])
     }
 
     if (strcmp(input[0], "launch") == 0) {
-      execute_launch(input);
+      ejecutar_launch(input);
     }
     else if (strcmp(input[0], "status") == 0) {
-      execute_status(input);
+      ejecutar_status();
     }
     else if (strcmp(input[0], "abort") == 0) { //IH: En base a update_finish_process
-      terminar_procesos(input);
+      if (shutdown_active) {
+        printf("Comando abort anulado por shutdown en proceso.\n");
+      } else {
+        terminar_procesos(input);
+      }
     }
-    else if (strcmp(input[0], "exit") == 0) {
-      free_user_input(input);
-      break;
+    else if (strcmp(input[0], "shutdown") == 0) {
+      if (!shutdown_active) {
+        ejecutar_shutdown();
+      }
     }
     else {
       printf("Comando no reconocido.\n");
