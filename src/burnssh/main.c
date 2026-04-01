@@ -17,7 +17,7 @@ typedef struct {
     time_t start_time;         
     int elapsed_time;         
     int is_paused;             
-    int is_running;            
+    int is_alive;            
     int exit_code;             
     int signal_value;
     time_t pause_start_time;
@@ -36,7 +36,7 @@ int time_max = -1;
 
 void imprimir_proceso(Process p) {
     int current_time = p.elapsed_time;
-    if (p.is_running) {
+    if (p.is_alive) {
       if (p.is_paused) {
         current_time = (int)(p.pause_start_time - p.start_time) - p.total_paused_time;
       } else {
@@ -52,8 +52,8 @@ void actualizar_procesos(){
   pid_t done_pid;
   while ((done_pid = waitpid(-1, &status, WNOHANG)) > 0) {
     for (int i = 0; i < process_count; i++) {
-      if (process_table[i].pid == done_pid && process_table[i].is_running) {
-        process_table[i].is_running = 0;
+      if (process_table[i].pid == done_pid && process_table[i].is_alive) {
+        process_table[i].is_alive = 0;
         if (process_table[i].is_paused){
           process_table[i].elapsed_time = (int)(process_table[i].pause_start_time - process_table[i].start_time) - process_table[i].total_paused_time;
           process_table[i].is_paused = 0;
@@ -80,7 +80,7 @@ void registrar_proceso(pid_t pid, char* executable) {
     process_table[process_count].start_time = time(NULL);
     process_table[process_count].elapsed_time = 0;
     process_table[process_count].is_paused = 0;
-    process_table[process_count].is_running = 1;
+    process_table[process_count].is_alive = 1;
     process_table[process_count].exit_code = -1;
     process_table[process_count].signal_value = -1;
     process_table[process_count].pause_start_time = 0;
@@ -127,14 +127,14 @@ void ejecutar_abort(char** input) { //IH: en base a función execute_status y up
   int corriendo = 0;
 
   for (int i = 0; i < process_count; i++) {
-    if (process_table[i].is_running) {
+    if (process_table[i].is_alive && !process_table[i].is_paused) {
       pids_to_abort[corriendo] = process_table[i].pid;
       corriendo++;
     }
   }
 
   if (corriendo == 0) {
-    printf("No hay procesos  en ejecución. Abort no se puede ejecutar. \n");
+    printf("No hay procesos en ejecución. Abort no se puede ejecutar. \n");
     return;
   }
 
@@ -171,7 +171,7 @@ void ejecutar_pause(char** pid){
   pid_t target_pid = atoi(pid[1]);
   int encontrado = 0;
   for (int i = 0; i < process_count; i++) {
-    if (process_table[i].pid == target_pid && process_table[i].is_running && kill(target_pid, 0) == 0){
+    if (process_table[i].pid == target_pid && process_table[i].is_alive && kill(target_pid, 0) == 0){
       encontrado = 1;
       if (process_table[i].is_paused) {
         printf("El proceso con PID %d ya está pausado.\n", target_pid);
@@ -193,7 +193,7 @@ void ejecutar_resume(char** pid){
   pid_t target_pid = atoi(pid[1]);
   int encontrado = 0;
   for (int i = 0; i < process_count; i++){
-    if (process_table[i].pid == target_pid && process_table[i].is_running && kill(target_pid, 0) == 0){
+    if (process_table[i].pid == target_pid && process_table[i].is_alive && kill(target_pid, 0) == 0){
       encontrado = 1;
       if (process_table[i].is_paused){
         kill(target_pid, SIGCONT);
@@ -219,7 +219,7 @@ void ejecutar_shutdown() {
   int corriendo = 0;
 
   for (int i = 0; i < process_count; i++) {
-    if (process_table[i].is_running) {
+    if (process_table[i].is_alive) {
       kill(process_table[i].pid, SIGINT);
       corriendo++;
     }
@@ -243,7 +243,7 @@ void revisar_tiempo_maximo(){
   }
 
   for (int i = 0; i < process_count; i++) {
-    if (process_table[i].is_running) {
+    if (process_table[i].is_alive) {
       int tiempo_ejecución;
       if (process_table[i].is_paused){
         tiempo_ejecución = (int)(process_table[i].pause_start_time - process_table[i].start_time) - process_table[i].total_paused_time;
@@ -289,7 +289,7 @@ int main(int argc, char const *argv[])
         
       if (time_passed >= 10) {
         for (int i = 0; i < process_count; i++) {
-          if (process_table[i].is_running) {
+          if (process_table[i].is_alive) {
             kill(process_table[i].pid, SIGKILL);
           }
         }
