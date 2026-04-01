@@ -6,6 +6,8 @@
 * **`<sys/wait.h>`**: Utilizada para la función `waitpid`, esencial para la recolección de procesos finalizados (zombies).
 * **`<signal.h>`**: Necesaria para el manejo de señales asíncronas mediante la función `kill` (`SIGTERM`, `SIGINT`, `SIGKILL`).
 
+---
+
 ### Estructuras y Variables Globales
 
 * **`struct Process`**: Define la estructura para cada proceso, almacenando su PID, nombre del ejecutable, tiempos de ejecución, si está pausado, si está vivo, el estado de salida (`exit_code` y `signal_value`), momento en que se inicio una pausa (solo guarda el valor del último pause hecho), tiempo total de pausa (considera todas las pausas), si recibió una señal SIGTERM y el momento en el que se recibió la señal SIGTERM.
@@ -48,6 +50,7 @@
   4. Si `shutdown_active = 0`, lee el input de la shell. Compara el input con los comandos existentes (usando `strcmp`) y llama a la función correspondiente. En el caso específico del comando abort, primero verifica que no esté activo el shutdown antes de llamar a la función ejecutar_abort.
   5. Finalmente, libera la memoria del input (`free_user_input`) para evitar memory leaks antes de la siguiente vuelta del while.
 
+---
 
 ### Supuestos o consideraciones
 
