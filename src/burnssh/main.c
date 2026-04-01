@@ -19,7 +19,11 @@ typedef struct {
     int is_paused;             
     int is_running;            
     int exit_code;             
-    int signal_value;          
+    int signal_value;
+    time_t pause_start_time;
+    int total_paused_time;
+    int timeout_sigterm_sent;
+    time_t sigterm_time;          
 } Process;
 
 Process process_table[MAX_PROCESSES];
@@ -28,12 +32,16 @@ int shutdown_active = 0;
 time_t shutdown_start_time;
 pid_t pending_aborts[MAX_PROCESSES];
 int pending_aborts_count = 0;
+int time_max = -1;
 
 void imprimir_proceso(Process p) {
     int current_time = p.elapsed_time;
     if (p.is_running) {
-      current_time = (int)(time(NULL) - p.start_time);
-      // hay que reformular esto cuando hagamos el pause
+      if (p.is_paused) {
+        current_time = (int)(p.pause_start_time - p.start_time) - p.total_paused_time;
+      } else {
+        current_time = (int)(time(NULL) - p.start_time) - p.total_paused_time;
+      }
     }
     char* paused_str = p.is_paused ? "True" : "False";
     printf("%d %s %d %s %d %d\n", p.pid, p.executable_name, current_time, paused_str, p.exit_code, p.signal_value);
@@ -46,7 +54,12 @@ void actualizar_procesos(){
     for (int i = 0; i < process_count; i++) {
       if (process_table[i].pid == done_pid && process_table[i].is_running) {
         process_table[i].is_running = 0;
-        process_table[i].elapsed_time = (int)(time(NULL) - process_table[i].start_time);                
+        if (process_table[i].is_paused){
+          process_table[i].elapsed_time = (int)(process_table[i].pause_start_time - process_table[i].start_time) - process_table[i].total_paused_time;
+          process_table[i].is_paused = 0;
+        } else {
+          process_table[i].elapsed_time = (int)(time(NULL) - process_table[i].start_time) - process_table[i].total_paused_time;
+        }
         if (WIFEXITED(status)) {
           process_table[i].exit_code = WEXITSTATUS(status);            
         } else if (WIFSIGNALED(status)) {
@@ -70,6 +83,10 @@ void registrar_proceso(pid_t pid, char* executable) {
     process_table[process_count].is_running = 1;
     process_table[process_count].exit_code = -1;
     process_table[process_count].signal_value = -1;
+    process_table[process_count].pause_start_time = 0;
+    process_table[process_count].total_paused_time = 0;
+    process_table[process_count].timeout_sigterm_sent = 0;
+    process_table[process_count].sigterm_time = 0;
     process_count++;
   } 
   else {
@@ -78,10 +95,6 @@ void registrar_proceso(pid_t pid, char* executable) {
 }
 
 void ejecutar_launch(char** input){
-  if (input[1] == NULL) {
-    printf("Error: launch requiere el nombre de un ejecutable.\n");
-    return;
-  } 
   pid_t pid = fork();
   if (pid < 0) {
     perror("Error al crear el proceso");
@@ -109,10 +122,6 @@ void ejecutar_status() {
 }
 
 void ejecutar_abort(char** input) { //IH: en base a función execute_status y updated_finished_processes
-  if (input[1] == NULL) {
-    printf("Error: el comando abort requiere un tiempo en segundos.\n");
-    return;
-  }
   int time_to_wait = atoi(input[1]); // transforma el tiempo a esperar a int
   int pids_to_abort[MAX_PROCESSES];
   int corriendo = 0;
@@ -158,6 +167,50 @@ void ejecutar_abort(char** input) { //IH: en base a función execute_status y up
   }
 }
 
+void ejecutar_pause(char** pid){
+  pid_t target_pid = atoi(pid[1]);
+  int encontrado = 0;
+  for (int i = 0; i < process_count; i++) {
+    if (process_table[i].pid == target_pid && process_table[i].is_running && kill(target_pid, 0) == 0){
+      encontrado = 1;
+      if (process_table[i].is_paused) {
+        printf("El proceso con PID %d ya está pausado.\n", target_pid);
+      } else {
+        kill(target_pid, SIGSTOP);
+        process_table[i].is_paused = 1;
+        process_table[i].pause_start_time = time(NULL);
+        printf("Proceso con PID %d ha sido pausado.\n", target_pid);
+      }
+      break;
+    }
+  }
+  if (!encontrado) {
+    printf("El PID %d no es válido.\n", target_pid);
+  }
+}
+
+void ejecutar_resume(char** pid){
+  pid_t target_pid = atoi(pid[1]);
+  int encontrado = 0;
+  for (int i = 0; i < process_count; i++){
+    if (process_table[i].pid == target_pid && process_table[i].is_running && kill(target_pid, 0) == 0){
+      encontrado = 1;
+      if (process_table[i].is_paused){
+        kill(target_pid, SIGCONT);
+        process_table[i].is_paused = 0;
+        process_table[i].total_paused_time += (int)(time(NULL) - process_table[i].pause_start_time);
+        printf("Proceso con PID %d ha sido reanudado.\n", target_pid);
+      } else {
+        printf("El proceso con PID %d no está pausado.\n", target_pid);
+      }
+      break;
+    }
+  }
+  if (!encontrado) {
+    printf("El PID %d no es válido.\n", target_pid);
+  }
+}
+
 void ejecutar_shutdown() {
   for (int i = 0; i < pending_aborts_count; i++) {
     kill(pending_aborts[i], SIGKILL);
@@ -184,13 +237,52 @@ void ejecutar_shutdown() {
   }
 }
 
+void revisar_tiempo_maximo(){
+  if (time_max == -1) {
+    return;
+  }
+
+  for (int i = 0; i < process_count; i++) {
+    if (process_table[i].is_running) {
+      int tiempo_ejecución;
+      if (process_table[i].is_paused){
+        tiempo_ejecución = (int)(process_table[i].pause_start_time - process_table[i].start_time) - process_table[i].total_paused_time;
+      } else {
+        tiempo_ejecución = (int)(time(NULL) - process_table[i].start_time) - process_table[i].total_paused_time;
+      }
+      if (tiempo_ejecución >= time_max && process_table[i].timeout_sigterm_sent == 0){
+        kill(process_table[i].pid, SIGTERM);
+        process_table[i].timeout_sigterm_sent = 1;
+        process_table[i].sigterm_time = time(NULL);
+        printf("\n[Timeout] El proceso '%s' (PID %d) ha superado el tiempo máximo de ejecución. Se ha enviado SIGTERM.\n", process_table[i].executable_name, process_table[i].pid);
+      }
+      else if (process_table[i].timeout_sigterm_sent == 1){
+        int tiempo_gracia = (int)(time(NULL) - process_table[i].sigterm_time);
+        if (tiempo_gracia >= 5) {
+          kill(process_table[i].pid, SIGKILL);
+          process_table[i].timeout_sigterm_sent = 2;
+          printf("\n[Timeout] El proceso '%s' (PID %d) no ha terminado después de SIGTERM. Se ha enviado SIGKILL.\n", process_table[i].executable_name, process_table[i].pid);
+        }
+      }
+    }
+  }
+
+}
+
 int main(int argc, char const *argv[])
 {
   set_buffer(); // No borrar
+  if (argc > 1) {
+    time_max = atoi(argv[1]);
+  } else {
+    time_max = -1;
+  }
+
   printf("Iniciando burnssh...\n");
 
   while (TRUE) {
     actualizar_procesos();
+    revisar_tiempo_maximo();
 
     if (shutdown_active) {
       int time_passed = (int)(time(NULL) - shutdown_start_time);
@@ -233,6 +325,12 @@ int main(int argc, char const *argv[])
       } else {
         ejecutar_abort(input);
       }
+    }
+    else if (strcmp(input[0], "pause") == 0) {
+      ejecutar_pause(input);
+    }
+    else if (strcmp(input[0], "resume") == 0) {
+      ejecutar_resume(input);
     }
     else if (strcmp(input[0], "shutdown") == 0) {
       if (!shutdown_active) {

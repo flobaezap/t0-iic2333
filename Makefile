@@ -48,7 +48,7 @@ LIB=$(MTH)
 COMMON=input_manager
 
 # Directorios que serán compilados a un programa
-PROGRAMS=Burnssh
+PROGRAMS=burnssh
 
 # Todos los directorios que contienen archivos de código
 SRCDIR=$(COMMON) $(PROGRAMS)
