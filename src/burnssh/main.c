@@ -244,13 +244,13 @@ void revisar_tiempo_maximo(){
 
   for (int i = 0; i < process_count; i++) {
     if (process_table[i].is_alive) {
-      int tiempo_ejecución;
+      int tiempo_ejecucion;
       if (process_table[i].is_paused){
-        tiempo_ejecución = (int)(process_table[i].pause_start_time - process_table[i].start_time) - process_table[i].total_paused_time;
+        tiempo_ejecucion = (int)(process_table[i].pause_start_time - process_table[i].start_time) - process_table[i].total_paused_time;
       } else {
-        tiempo_ejecución = (int)(time(NULL) - process_table[i].start_time) - process_table[i].total_paused_time;
+        tiempo_ejecucion = (int)(time(NULL) - process_table[i].start_time) - process_table[i].total_paused_time;
       }
-      if (tiempo_ejecución >= time_max && process_table[i].timeout_sigterm_sent == 0){
+      if (tiempo_ejecucion >= time_max && process_table[i].timeout_sigterm_sent == 0){
         kill(process_table[i].pid, SIGTERM);
         process_table[i].timeout_sigterm_sent = 1;
         process_table[i].sigterm_time = time(NULL);
